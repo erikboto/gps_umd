@@ -3,6 +3,7 @@
 #include <gps_msgs/msg/gps_status.hpp>
 #include <sensor_msgs/msg/nav_sat_fix.hpp>
 #include <sensor_msgs/msg/nav_sat_status.hpp>
+#include <sensor_msgs/msg/time_reference.hpp>
 #include <libgpsmm.h>
 
 #include <chrono>
@@ -21,7 +22,8 @@ namespace gpsd_client
       use_gps_time_(true),
       check_fix_by_variance_(true),
       frame_id_("gps"),
-      publish_rate_(1)
+      publish_rate_(1),
+      send_time_reference_(true)
     {
       start();
       timer_ = create_wall_timer(publish_period_ms, std::bind(&GPSDClientComponent::step, this));
@@ -36,14 +38,17 @@ namespace gpsd_client
       this->declare_parameter("publish_rate", rclcpp::PARAMETER_INTEGER);
       this->declare_parameter("host", rclcpp::PARAMETER_STRING);
       this->declare_parameter("port", rclcpp::PARAMETER_INTEGER);
+      this->declare_parameter("send_time_reference", rclcpp::PARAMETER_BOOL);
 
       gps_fix_pub_ = create_publisher<gps_msgs::msg::GPSFix>("extended_fix", 1);
       navsatfix_pub_ = create_publisher<sensor_msgs::msg::NavSatFix>("fix", 1);
+      timeref_pub_ = create_publisher<sensor_msgs::msg::TimeReference>("time_ref", 1);
 
       this->get_parameter_or("use_gps_time", use_gps_time_, use_gps_time_);
       this->get_parameter_or("check_fix_by_variance", check_fix_by_variance_, check_fix_by_variance_);
       this->get_parameter_or("frame_id", frame_id_, frame_id_);
       this->get_parameter_or("publish_rate", publish_rate_, publish_rate_);
+      this->get_parameter_or("send_time_reference", send_time_reference_, send_time_reference_);
 
       publish_period_ms = std::chrono::milliseconds{(int)(1000 / publish_rate_)};
 
@@ -120,6 +125,10 @@ namespace gpsd_client
 
       process_data_gps(p);
       process_data_navsat(p);
+
+      if (send_time_reference_) {
+        process_data_timeref(p);
+      }
     }
 
 
@@ -334,8 +343,29 @@ namespace gpsd_client
       navsatfix_pub_->publish(std::move(fix));
     }
 
+    void process_data_timeref(struct gps_data_t* p)
+    {
+      sensor_msgs::msg::TimeReference::UniquePtr timeref = std::make_unique<sensor_msgs::msg::TimeReference>();
+
+#if GPSD_API_MAJOR_VERSION >= 9
+      if ((p->online.tv_sec || p->online.tv_nsec)) {
+        timeref->time_ref = rclcpp::Time(p->fix.time.tv_sec, p->fix.time.tv_nsec);
+#else
+      if (!std::isnan(p->fix.time)) {
+        timeref->time_ref = rclcpp::Time(p->fix.time);
+#endif
+
+        timeref->header.stamp = this->get_clock()->now();
+        timeref->header.frame_id = frame_id_;
+
+        RCLCPP_DEBUG(this->get_logger(), "Publishing time ref message...");
+        timeref_pub_->publish(std::move(timeref));
+      }
+    }
+
     rclcpp::Publisher<gps_msgs::msg::GPSFix>::SharedPtr gps_fix_pub_;
     rclcpp::Publisher<sensor_msgs::msg::NavSatFix>::SharedPtr navsatfix_pub_;
+    rclcpp::Publisher<sensor_msgs::msg::TimeReference>::SharedPtr timeref_pub_;
 
     gpsmm* gps_;
 
@@ -343,6 +373,7 @@ namespace gpsd_client
     bool check_fix_by_variance_;
     std::string frame_id_;
     int publish_rate_;
+    bool send_time_reference_;
     std::chrono::milliseconds publish_period_ms{};
     rclcpp::TimerBase::SharedPtr timer_;
   };
