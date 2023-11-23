@@ -358,8 +358,11 @@ namespace gpsd_client
         timeref->header.stamp = this->get_clock()->now();
         timeref->header.frame_id = frame_id_;
 
-        RCLCPP_DEBUG(this->get_logger(), "Publishing time ref message...");
-        timeref_pub_->publish(std::move(timeref));
+        if (timeref->time_ref.sec != 0)
+        {
+          RCLCPP_DEBUG(this->get_logger(), "Publishing time ref message...");
+          timeref_pub_->publish(std::move(timeref));
+        }
       }
     }
 
