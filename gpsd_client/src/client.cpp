@@ -147,6 +147,13 @@ namespace gpsd_client
       gps_msgs::msg::GPSFix fix;
       gps_msgs::msg::GPSStatus status;
 
+      if (!(check_fix_by_variance_ && std::isnan(p->fix.epx)))
+      {
+            fix.status.status = p->fix.status;
+      } else {
+            fix.status.status = 0;
+      }
+
       status.header.stamp = time;
       fix.header.stamp = time;
       fix.header.frame_id = frame_id_;
@@ -184,32 +191,9 @@ namespace gpsd_client
         status.satellite_visible_snr[i] = p->ss[i];
 #endif
       }
-#if GPSD_API_MAJOR_VERSION >= 10
-#ifdef STATUS_FIX
-      if ((p->fix.status & STATUS_FIX) && !(check_fix_by_variance_ && std::isnan(p->fix.epx)))
-#else
-      if ((p->fix.status & STATUS_GPS) && !(check_fix_by_variance_ && std::isnan(p->fix.epx)))
-#endif
-#else
-      if ((p->status & STATUS_FIX) && !(check_fix_by_variance_ && std::isnan(p->fix.epx)))
-#endif
+
+      if (p->fix.mode > MODE_NO_FIX)
       {
-        status.status = 0; // FIXME: gpsmm puts its constants in the global
-        // namespace, so `GPSStatus::STATUS_FIX' is illegal.
-
-// STATUS_DGPS_FIX was removed in API version 6 but re-added afterward
-#if GPSD_API_MAJOR_VERSION != 6
-#if GPSD_API_MAJOR_VERSION >= 10
-#ifdef STATUS_DGPS_FIX
-      if (p->fix.status & STATUS_DGPS_FIX)
-#else
-      if (p->fix.status & STATUS_DGPS)
-#endif
-#else
-      if (p->status & STATUS_DGPS_FIX)
-#endif
-#endif
-
 #if GPSD_API_MAJOR_VERSION >= 9
         fix.time = (double)(p->fix.time.tv_sec) + (double)(p->fix.time.tv_nsec) / 1000000.;
 #else
@@ -248,8 +232,6 @@ namespace gpsd_client
         fix.err_time = p->fix.ept;
 
         /* TODO: attitude */
-      } else {
-        status.status = -1; // STATUS_NO_FIX
       }
 
       fix.status = status;
